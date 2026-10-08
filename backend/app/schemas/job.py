@@ -9,7 +9,12 @@ class JobBase(BaseModel):
     """Base job schema."""
     title: str
     company_name: Optional[str] = None
+    role_family: Optional[str] = None
+    normalized_role: Optional[str] = None
     location: Optional[str] = None
+    normalized_city: Optional[str] = None
+    state: Optional[str] = None
+    is_remote: Optional[int] = 0
     country: Optional[str] = None
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None
@@ -69,7 +74,10 @@ class JobFilters(BaseModel):
     """Filters for querying jobs."""
     country: Optional[str] = None
     role: Optional[str] = None
+    role_family: Optional[str] = None
+    normalized_role: Optional[str] = None
     location: Optional[str] = None
+    normalized_city: Optional[str] = None
     experience_level: Optional[str] = None
     company: Optional[str] = None
     skill: Optional[str] = None

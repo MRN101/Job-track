@@ -9,14 +9,33 @@ from app.models.job import Job
 from app.schemas.job import JobResponse, JobListResponse, SkillInJob
 from app.services.query_service import get_jobs_query
 
+from app.analyzers.role_classifier import ROLE_TAXONOMY, get_all_role_families, get_roles_for_family
+
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+
+@router.get("/taxonomy")
+def get_taxonomy():
+    """Return available role families and canonical roles."""
+    return {
+        "families": [
+            {
+                "name": fam,
+                "roles": [r["name"] for r in data["roles"]],
+            }
+            for fam, data in ROLE_TAXONOMY.items()
+        ]
+    }
 
 
 @router.get("", response_model=JobListResponse)
 def list_jobs(
     country: Optional[str] = None,
     role: Optional[str] = None,
+    role_family: Optional[str] = None,
+    normalized_role: Optional[str] = None,
     location: Optional[str] = None,
+    normalized_city: Optional[str] = None,
     experience_level: Optional[str] = None,
     company: Optional[str] = None,
     source: Optional[str] = None,
@@ -35,7 +54,10 @@ def list_jobs(
         db=db,
         country=country,
         role=role,
+        role_family=role_family,
+        normalized_role=normalized_role,
         location=location,
+        normalized_city=normalized_city,
         experience_level=experience_level,
         source=source,
         time_period=time_period,
@@ -83,8 +105,13 @@ def list_jobs(
                 data_type=job.data_type,
                 external_id=job.external_id,
                 title=job.title,
+                role_family=job.role_family,
+                normalized_role=job.normalized_role,
                 company_name=job.company_name,
                 location=job.location,
+                normalized_city=job.normalized_city,
+                state=job.state,
+                is_remote=job.is_remote,
                 country=job.country,
                 description=job.description,
                 salary_min=job.salary_min,
@@ -136,8 +163,13 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         data_type=job.data_type,
         external_id=job.external_id,
         title=job.title,
+        role_family=job.role_family,
+        normalized_role=job.normalized_role,
         company_name=job.company_name,
         location=job.location,
+        normalized_city=job.normalized_city,
+        state=job.state,
+        is_remote=job.is_remote,
         country=job.country,
         description=job.description,
         salary_min=job.salary_min,

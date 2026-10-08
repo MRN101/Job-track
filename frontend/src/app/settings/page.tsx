@@ -335,13 +335,86 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Automated Historical Collection Scheduling */}
+      <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/80 dark:border-gray-800 p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-extrabold text-gray-900 dark:text-white">
+              Automated Historical Collection Scheduling
+            </h2>
+            <p className="text-xs text-gray-500">
+              Configure background collection cadence for continuous market intelligence
+            </p>
+          </div>
+          <a
+            href="/collection-history"
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 transition"
+          >
+            View Collection Logs →
+          </a>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 pt-2">
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">
+              Cadence
+            </label>
+            <select
+              defaultValue="daily"
+              onChange={async (e) => {
+                const freq = e.target.value;
+                try {
+                  const res = await fetch(`/api/analytics/scheduler/interval?frequency=${freq}`, { method: "POST" });
+                  if (res.ok) {
+                    setMessage(`Scheduler interval updated to ${freq}!`);
+                    setTimeout(() => setMessage(null), 3000);
+                  }
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-semibold"
+            >
+              <option value="daily">Daily (Recommended default)</option>
+              <option value="weekly">Weekly</option>
+              <option value="manual">Manual only (Paused)</option>
+            </select>
+          </div>
+
+          <div className="pt-4">
+            <button
+              onClick={async () => {
+                setCollecting(true);
+                setCollectionStatus("Triggering background collection...");
+                try {
+                  const res = await fetch("/api/analytics/scheduler/trigger", { method: "POST" });
+                  if (res.ok) {
+                    setCollectionStatus("Background collection pipeline initiated successfully! Check Collection History for progress.");
+                  }
+                } catch (err: any) {
+                  setCollectionStatus("Failed: " + err.message);
+                } finally {
+                  setCollecting(false);
+                }
+              }}
+              disabled={collecting}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition disabled:opacity-50"
+            >
+              Trigger Full Pipeline Now
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Technical Architecture Notes */}
       <div className="p-5 rounded-2xl bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs text-gray-500 space-y-1">
         <p className="font-bold text-gray-800 dark:text-gray-200">
           Backend Architecture & Storage
         </p>
-        <p>• Database: SQLite (local file at <code className="font-mono">backend/data/jobpulse.db</code>)</p>
-        <p>• Skill Extraction: Canonical taxonomy dictionary with boundary regex matching + optional LLM analysis</p>
+        <p>• Database: SQLite / PostgreSQL compatible (local at <code className="font-mono">backend/data/jobpulse.db</code>)</p>
+        <p>• Background Scheduling: APScheduler running background daemon collection and snapshot creation</p>
+        <p>• Role Taxonomy: Deterministic multi-tier taxonomy classification (Software Engineering, Data, AI/ML, DevOps, QA, Product)</p>
+        <p>• Skill Extraction: Strict contextual dictionary + lightweight candidate phrase detection</p>
         <p>• API Docs: <a href="http://localhost:8000/api/docs" target="_blank" className="text-blue-500 underline">http://localhost:8000/api/docs</a></p>
       </div>
     </div>

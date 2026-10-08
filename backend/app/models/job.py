@@ -25,6 +25,15 @@ class Job(Base):
     country = Column(String(100), nullable=True, index=True)
     description = Column(Text, nullable=True)
 
+    # Role normalization
+    role_family = Column(String(100), nullable=True, index=True)
+    normalized_role = Column(String(100), nullable=True, index=True)
+
+    # Location normalization
+    normalized_city = Column(String(100), nullable=True, index=True)
+    state = Column(String(100), nullable=True)
+    is_remote = Column(Integer, nullable=False, default=0)
+
     # Salary fields
     salary_min = Column(Float, nullable=True)
     salary_max = Column(Float, nullable=True)

@@ -15,6 +15,27 @@ interface TrendSkill {
   trend_direction?: "up" | "down" | "stable";
 }
 
+interface CandidateSkill {
+  id: number;
+  name: string;
+  normalized_name?: string;
+  job_count: number;
+  occurrences: number;
+  confidence: number;
+  status: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
+}
+
+interface AlertItem {
+  type: string;
+  title: string;
+  message: string;
+  severity: string;
+  timestamp: string;
+  data?: any;
+}
+
 interface TrendsData {
   emerging: TrendSkill[];
   declining: TrendSkill[];
@@ -29,6 +50,8 @@ interface TrendsData {
 
 export default function TrendsPage() {
   const [trends, setTrends] = useState<TrendsData | null>(null);
+  const [candidateSkills, setCandidateSkills] = useState<CandidateSkill[]>([]);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [period, setPeriod] = useState("30d");
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [role, setRole] = useState("all");
@@ -44,10 +67,23 @@ export default function TrendsPage() {
       try {
         const demoParam = isDemoMode ? "&include_demo=true" : "";
         const roleParam = role !== "all" ? `&role=${encodeURIComponent(role)}` : "";
-        const res = await fetch(`/api/analytics/trends?period=${period}${demoParam}${roleParam}`);
-        if (res.ok && !ignore) {
-          const data = await res.json();
+        const [trendsRes, candRes, alertRes] = await Promise.all([
+          fetch(`/api/analytics/trends?period=${period}${demoParam}${roleParam}`),
+          fetch(`/api/analytics/candidate-skills?status=candidate&limit=10`),
+          fetch(`/api/analytics/alerts?growth_threshold=2.0`),
+        ]);
+
+        if (trendsRes.ok && !ignore) {
+          const data = await trendsRes.json();
           setTrends(data);
+        }
+        if (candRes.ok && !ignore) {
+          const cData = await candRes.json();
+          setCandidateSkills(cData);
+        }
+        if (alertRes.ok && !ignore) {
+          const aData = await alertRes.json();
+          setAlerts(aData);
         }
       } catch (e) {
         console.error("Error fetching trends:", e);
@@ -79,6 +115,30 @@ export default function TrendsPage() {
       console.error(e);
     } finally {
       setSnapshotting(false);
+    }
+  };
+
+  const handleApproveCandidate = async (candId: number) => {
+    try {
+      const res = await fetch(`/api/analytics/candidate-skills/${candId}/approve`, { method: "POST" });
+      if (res.ok) {
+        setCandidateSkills((prev) => prev.filter((c) => c.id !== candId));
+        setSnapshotMessage("Skill approved into canonical taxonomy!");
+        setTimeout(() => setSnapshotMessage(null), 3000);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRejectCandidate = async (candId: number) => {
+    try {
+      const res = await fetch(`/api/analytics/candidate-skills/${candId}/reject`, { method: "POST" });
+      if (res.ok) {
+        setCandidateSkills((prev) => prev.filter((c) => c.id !== candId));
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -169,6 +229,26 @@ export default function TrendsPage() {
       {snapshotMessage && (
         <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-medium">
           {snapshotMessage}
+        </div>
+      )}
+
+      {/* Personal Market Intelligence Alerts (Phase 31) */}
+      {alerts && alerts.length > 0 && (
+        <div className="bg-indigo-950/40 border border-indigo-900/60 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+              Personal Intelligence Alerts ({alerts.length})
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {alerts.slice(0, 3).map((a, idx) => (
+              <div key={idx} className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
+                <span className="font-bold text-slate-100 block">{a.title}</span>
+                <p className="text-slate-400 text-[11px] mt-1">{a.message}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -310,6 +390,62 @@ export default function TrendsPage() {
           </div>
         </div>
       )}
+
+      {/* Candidate Emerging Tech Radar (Phase 15, 16, 17) */}
+      <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/80 dark:border-gray-800 p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+              Candidate Emerging Tech Radar
+            </h2>
+            <p className="text-xs text-gray-500">
+              Uncatalogued technical phrases detected by NLP heuristics in live job descriptions. Approve to promote into canonical taxonomy.
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 font-medium">
+            {candidateSkills.length} candidates tracked
+          </span>
+        </div>
+
+        {candidateSkills.length === 0 ? (
+          <p className="text-xs text-gray-400 py-6 text-center">
+            No uncatalogued candidates detected yet. Run job collection to discover new tools.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {candidateSkills.map((cand) => (
+              <div
+                key={cand.id}
+                className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200/60 dark:border-gray-800 flex items-center justify-between gap-3"
+              >
+                <div>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white">{cand.name}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Found in <span className="font-semibold text-indigo-600 dark:text-indigo-400">{cand.job_count} jobs</span> • Conf: {Math.round(cand.confidence * 100)}%
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => handleApproveCandidate(cand.id)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                    title="Promote to canonical taxonomy"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => handleRejectCandidate(cand.id)}
+                    className="px-2 py-1 rounded-lg text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition"
+                    title="Reject candidate"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

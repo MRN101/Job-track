@@ -111,47 +111,103 @@ npm run dev
 ```
 
 - Web Dashboard: `http://localhost:3000`
+- Collection History: `http://localhost:3000/collection-history`
 
 ---
 
 ## Automated Test Suite
 
-Run the full analytical verification test suite:
+Run the full automated test suite directly:
 
 ```bash
 cd backend
-.\venv\Scripts\python -m pytest -v -o pythonpath=. tests/test_analytics.py
+pytest
 ```
 
-### Verified Test Cases:
-- Date filtering (7d, 30d, 90d strict freshness)
-- Centralized skill normalization (`React.js` → `React`, `Postgres` → `PostgreSQL`, `AWS` → `AWS`)
-- False positive elimination (no accidental matches for `C` or `Go`)
-- Salary statistical percentiles (odd & even lists, Q1, median, Q3)
-- Salary normalization (LPA conversion, hourly/monthly to annual)
-- Currency conversion (INR, USD, EUR, GBP)
-- Real vs. Demo data segregation
-- Honest insufficient data handling for trends
-- Real period-over-period percentage point trends
-- Incremental job deduplication & content hashing
+### Verified Test Cases (15/15 Passing):
+1. **Skill Normalization**: Maps variants to canonical names (`React.js` → `React`, `Postgres` → `PostgreSQL`).
+2. **False Positive Elimination**: Strict word boundary matching prevents false positives for `C`, `R`, `Go`, `.NET`, `AI`, `SQL`, `AWS`.
+3. **Salary Percentiles**: Statistical NumPy percentiles (min, max, median, 25th percentile, 75th percentile).
+4. **Salary Normalization & LPA**: LPA conversion (e.g. ₹6–12 LPA → ₹600k–₹1.2M), hourly/monthly to annual.
+5. **Multi-Currency Conversion**: Transparent conversion across INR, USD, EUR, and GBP.
+6. **Date Filtering**: Strict freshness scoping across 7d, 30d, 90d, 6m, 1y, all.
+7. **Real vs. Demo Separation**: Demo data is never mixed into default analytics queries.
+8. **Honest Insufficient History**: Reports insufficient data when `< 2` jobs exist, never fabricating trends.
+9. **Trend Calculation**: Equivalent real period comparison reporting delta in percentage points (`pp`).
+10. **Duplicate Job Detection**: Content hashing and external ID deduplication prevent duplicate entries.
+11. **Short Skill Boundary Matching**: Verifies positive technical contexts and negative colloquial contexts for short terms.
+12. **Role Taxonomy & Classification**: Deterministic classification into Role Family and Normalized Role.
+13. **Location Normalization**: Normalizes Bangalore/Bombay/Calcutta/Madras variants and geocodes tech hubs and remote flags.
+14. **Candidate Skill Discovery**: Lightweight NLP extracts uncatalogued tools (`MCP`, `WASM`) without corrupting taxonomy.
+15. **End-to-End Pipeline Integration**: Full collector → DB → taxonomy & location normalization → snapshot → trends pipeline.
 
 ---
 
-## Database Schema Overview
+## Automated Background Scheduler
 
-- `jobs`: Stores raw & normalized job listings (`source`, `data_type`, `salary_normalized`, `first_seen_at`, `last_seen_at`, `content_hash`).
-- `companies`: Normalizes employer brands.
-- `skills`: Canonical taxonomy skills and categories.
-- `job_skills`: Many-to-many relationship linking jobs to detected skills.
-- `candidate_skills`: Unseen skills detected by heuristics or LLM pending review.
-- `analysis_runs`: Snapshots of historical runs (`source`, `data_type`, `time_period_start`, `time_period_end`).
-- `skill_demands`: Skill percentage points and counts for each analysis run.
-- `user_profiles`: User's skills and target roles for skill gap evaluation.
+JobPulse includes a background scheduler (`APScheduler`) that continuously runs the job intelligence pipeline:
+
+```text
+Scheduled collection
+        ↓
+Get enabled sources (Remotive, Adzuna)
+        ↓
+Normalize roles & locations
+        ↓
+Deduplicate against existing records
+        ↓
+Extract canonical & candidate skills
+        ↓
+Update analysis & create historical snapshot
+```
+
+- **Cadences**: Daily (default), Weekly, or Manual (paused).
+- **Trigger on demand**: Trigger collection directly from `/collection-history` or `/settings`.
 
 ---
 
-## Limitations & Operational Notes
+## Production Deployment Readiness
 
-- **Single-User Scope**: Designed as a personal job market intelligence dashboard; no multi-tenant authentication.
-- **Local Storage**: Defaults to SQLite at `backend/data/jobpulse.db`. For production, point `DATABASE_URL` to PostgreSQL.
-- **Adzuna API Credentials**: Adzuna requires free API keys in `.env`; Remotive works without credentials.
+### 1. Environment Variables
+
+Create `.env` in `backend/`:
+
+```env
+# Application
+APP_ENV=production
+DEBUG=false
+SECRET_KEY=your-production-secret-key
+
+# Database (SQLite by default, or PostgreSQL)
+DATABASE_URL=sqlite:///./data/jobpulse.db
+# For PostgreSQL:
+# DATABASE_URL=postgresql://user:password@localhost:5432/jobpulse
+
+# Collector API Keys
+ADZUNA_APP_ID=your_adzuna_app_id
+ADZUNA_API_KEY=your_adzuna_api_key
+
+# Server & CORS
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+FRONTEND_URL=http://localhost:3000
+```
+
+### 2. Running in Production
+
+**Backend Production Run**:
+```bash
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+**Frontend Production Build & Start**:
+```bash
+cd frontend
+npm run build
+npm start
+```
+
+### 3. Database Notes: SQLite vs PostgreSQL
+- **SQLite (Default)**: Ideal for personal local use with zero setup. Supports ACID transactions and auto-migrations. SQLite limits concurrent writes, so for multi-threaded cloud deployments, point `DATABASE_URL` to a PostgreSQL instance.
+- **PostgreSQL**: JobPulse's SQLAlchemy models and query services are fully PostgreSQL-compatible without code changes. Install `psycopg2-binary` if connecting to PostgreSQL.

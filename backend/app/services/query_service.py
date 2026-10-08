@@ -40,7 +40,10 @@ def get_jobs_query(
     db: Session,
     country: Optional[str] = None,
     role: Optional[str] = None,
+    role_family: Optional[str] = None,
+    normalized_role: Optional[str] = None,
     location: Optional[str] = None,
+    normalized_city: Optional[str] = None,
     experience_level: Optional[str] = None,
     source: Optional[str] = None,
     time_period: Optional[str] = "30d",
@@ -48,13 +51,15 @@ def get_jobs_query(
     include_demo: bool = False,
     date_range: Optional[Tuple[datetime, datetime]] = None,
 ) -> Query:
-    """Build a filtered Job query adhering to rigorous data separation and date filtering.
+    """Build a filtered Job query adhering to rigorous data separation and taxonomy filtering.
 
     Rule:
     - Real data is the default (Job.data_type == 'real').
     - Demo data is NEVER mixed into real analytics unless include_demo=True or data_type='demo'.
     - Time filter strictly uses coalesce(Job.posted_at, Job.collected_at).
     """
+    from sqlalchemy import or_
+
     query = db.query(Job)
 
     # 1. Real vs Demo separation
@@ -62,7 +67,6 @@ def get_jobs_query(
         query = query.filter(Job.data_type == "demo")
     elif not include_demo:
         query = query.filter(Job.data_type == "real")
-    # If include_demo=True and data_type is not demo, all data types are allowed
 
     # 2. Source filter
     if source and source.lower() not in ("all", "all sources"):
@@ -72,13 +76,36 @@ def get_jobs_query(
     if country and country.lower() not in ("all", "all countries", "worldwide"):
         query = query.filter(Job.country.ilike(f"%{country.strip()}%"))
 
-    # 4. Role filter
-    if role and role.lower() not in ("all", "all roles"):
-        query = query.filter(Job.title.ilike(f"%{role.strip()}%"))
+    # 4. Taxonomy Role filters
+    if role_family and role_family.lower() not in ("all", "all families", "all roles"):
+        query = query.filter(Job.role_family == role_family.strip())
 
-    # 5. Location filter
+    if normalized_role and normalized_role.lower() not in ("all", "all roles"):
+        query = query.filter(Job.normalized_role == normalized_role.strip())
+
+    # Freeform role filter (checks normalized_role, role_family, and raw title)
+    if role and role.lower() not in ("all", "all roles"):
+        r_str = role.strip()
+        query = query.filter(
+            or_(
+                Job.normalized_role.ilike(f"%{r_str}%"),
+                Job.role_family.ilike(f"%{r_str}%"),
+                Job.title.ilike(f"%{r_str}%"),
+            )
+        )
+
+    # 5. Location filters
+    if normalized_city and normalized_city.lower() not in ("all", "all locations", "all cities"):
+        query = query.filter(Job.normalized_city.ilike(f"%{normalized_city.strip()}%"))
+
     if location and location.lower() not in ("all", "all locations"):
-        query = query.filter(Job.location.ilike(f"%{location.strip()}%"))
+        l_str = location.strip()
+        query = query.filter(
+            or_(
+                Job.normalized_city.ilike(f"%{l_str}%"),
+                Job.location.ilike(f"%{l_str}%"),
+            )
+        )
 
     # 6. Experience level filter
     if experience_level and experience_level.lower() not in ("all", "any"):

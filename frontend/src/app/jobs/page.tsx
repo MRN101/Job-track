@@ -15,8 +15,13 @@ interface Job {
   data_type: string;
   external_id?: string;
   title: string;
+  role_family?: string;
+  normalized_role?: string;
   company_name?: string;
   location?: string;
+  normalized_city?: string;
+  state?: string;
+  is_remote?: number;
   country?: string;
   description?: string;
   salary_min?: number;
@@ -37,6 +42,8 @@ export default function JobsPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [search, setSearch] = useState("");
+  const [roleFamilyFilter, setRoleFamilyFilter] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [isDemoMode, setIsDemoMode] = useState(false);
@@ -57,6 +64,8 @@ export default function JobsPage() {
           sort_by: sortBy,
         });
         if (submittedSearch.trim()) params.append("search", submittedSearch.trim());
+        if (roleFamilyFilter.trim()) params.append("role_family", roleFamilyFilter.trim());
+        if (cityFilter.trim()) params.append("normalized_city", cityFilter.trim());
         if (roleFilter.trim()) params.append("role", roleFilter.trim());
         if (sourceFilter !== "all") params.append("source", sourceFilter);
         if (isDemoMode) params.append("include_demo", "true");
@@ -77,7 +86,7 @@ export default function JobsPage() {
     return () => {
       ignore = true;
     };
-  }, [page, sortBy, roleFilter, sourceFilter, isDemoMode, refreshKey, pageSize, submittedSearch]);
+  }, [page, sortBy, roleFamilyFilter, cityFilter, roleFilter, sourceFilter, isDemoMode, refreshKey, pageSize, submittedSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,21 +184,43 @@ export default function JobsPage() {
           {isDemoMode && <option value="sample">Sample</option>}
         </select>
 
-        {/* Role Selector */}
+        {/* Role Family Selector */}
         <select
-          value={roleFilter}
+          value={roleFamilyFilter}
           onChange={(e) => {
-            setRoleFilter(e.target.value);
+            setRoleFamilyFilter(e.target.value);
             setPage(1);
           }}
           className="px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">All Roles</option>
-          <option value="Frontend">Frontend</option>
-          <option value="Backend">Backend</option>
-          <option value="Full Stack">Full Stack</option>
-          <option value="DevOps">DevOps & Cloud</option>
-          <option value="Data">Data & AI</option>
+          <option value="">All Role Families</option>
+          <option value="Software Engineering">Software Engineering</option>
+          <option value="Data & Analytics">Data & Analytics</option>
+          <option value="AI & Machine Learning">AI & Machine Learning</option>
+          <option value="Cloud & DevOps">Cloud & DevOps</option>
+          <option value="QA & Testing">QA & Testing</option>
+          <option value="Product & Security">Product & Security</option>
+        </select>
+
+        {/* Normalized Location Selector */}
+        <select
+          value={cityFilter}
+          onChange={(e) => {
+            setCityFilter(e.target.value);
+            setPage(1);
+          }}
+          className="px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">All Locations</option>
+          <option value="Bengaluru">Bengaluru</option>
+          <option value="Mumbai">Mumbai</option>
+          <option value="Hyderabad">Hyderabad</option>
+          <option value="Pune">Pune</option>
+          <option value="New Delhi">Delhi / NCR</option>
+          <option value="Chennai">Chennai</option>
+          <option value="Kolkata">Kolkata</option>
+          <option value="San Francisco">San Francisco</option>
+          <option value="Remote">Remote</option>
         </select>
 
         {/* Sort Selector */}
@@ -217,7 +248,7 @@ export default function JobsPage() {
             No matching jobs found
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Try adjusting your search criteria or load sample data from Settings.
+            Try adjusting your search criteria or run collection from Collection History.
           </p>
         </div>
       ) : (
@@ -242,6 +273,16 @@ export default function JobsPage() {
                     <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
                       {job.source}
                     </span>
+                    {job.normalized_role && (
+                      <span className="px-2 py-0.5 rounded-lg text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/40">
+                        {job.role_family ? `${job.role_family} › ` : ""}{job.normalized_role}
+                      </span>
+                    )}
+                    {job.normalized_city && (
+                      <span className="px-2 py-0.5 rounded-lg text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
+                        📍 {job.normalized_city}{job.is_remote ? " (Remote)" : ""}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
@@ -324,9 +365,21 @@ export default function JobsPage() {
                 <h3 className="text-xl font-extrabold text-gray-900 dark:text-white">
                   {selectedJob.title}
                 </h3>
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mt-0.5">
-                  {selectedJob.company_name} • {selectedJob.location}
-                </p>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    {selectedJob.company_name || "Confidential"} • {selectedJob.location || "Remote"}
+                  </span>
+                  {selectedJob.normalized_role && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                      Taxonomy: {selectedJob.role_family} → {selectedJob.normalized_role}
+                    </span>
+                  )}
+                  {selectedJob.normalized_city && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                      📍 {selectedJob.normalized_city}{selectedJob.state ? `, ${selectedJob.state}` : ""} ({selectedJob.country})
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setSelectedJob(null)}

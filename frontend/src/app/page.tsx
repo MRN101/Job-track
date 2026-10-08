@@ -54,6 +54,9 @@ interface DataQualityMetrics {
   jobs_with_description: number;
   jobs_with_salary: number;
   jobs_with_skills: number;
+  roles_normalized?: number;
+  locations_normalized?: number;
+  duplicate_records_prevented?: number;
   sources_breakdown: Record<string, number>;
   last_collection_per_source: Record<string, string | null>;
 }
@@ -500,41 +503,56 @@ export default function DashboardPage() {
 
             {/* Data Quality & Integrity Card */}
             <div className="lg:col-span-2 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/80 dark:border-gray-800 p-6 shadow-sm">
-              <h2 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-4">
-                Data Quality & Coverage Metrics
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
-                  <p className="text-xs text-gray-500">Total In Database</p>
-                  <p className="mt-1 text-xl font-bold text-gray-900 dark:text-white">{dataQuality?.total_jobs ?? 0}</p>
-                  <p className="text-[10px] text-gray-400 mt-1">Real: {dataQuality?.real_jobs ?? 0} | Demo: {dataQuality?.demo_jobs ?? 0}</p>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                  Data Quality & Coverage Metrics
+                </h2>
+                <span className="text-[11px] text-gray-500 font-medium">
+                  {dataQuality?.duplicate_records_prevented ?? 0} duplicates prevented
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-gray-500">Total Listings</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{dataQuality?.total_jobs ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Real: {dataQuality?.real_jobs ?? 0}</p>
                 </div>
-                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
-                  <p className="text-xs text-gray-500">With Descriptions</p>
-                  <p className="mt-1 text-xl font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_description ?? 0}</p>
-                  <p className="text-[10px] text-gray-400 mt-1">
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-gray-500">Descriptions</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_description ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
                     {dataQuality?.total_jobs
-                      ? `${Math.round(((dataQuality.jobs_with_description) / dataQuality.total_jobs) * 100)}% coverage`
+                      ? `${Math.round(((dataQuality.jobs_with_description) / dataQuality.total_jobs) * 100)}%`
                       : "0%"}
                   </p>
                 </div>
-                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
-                  <p className="text-xs text-gray-500">With Salary Data</p>
-                  <p className="mt-1 text-xl font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_salary ?? 0}</p>
-                  <p className="text-[10px] text-gray-400 mt-1">
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-gray-500">Salary Data</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_salary ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
                     {dataQuality?.total_jobs
-                      ? `${Math.round(((dataQuality.jobs_with_salary) / dataQuality.total_jobs) * 100)}% coverage`
+                      ? `${Math.round(((dataQuality.jobs_with_salary) / dataQuality.total_jobs) * 100)}%`
                       : "0%"}
                   </p>
                 </div>
-                <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
-                  <p className="text-xs text-gray-500">Skills Detected</p>
-                  <p className="mt-1 text-xl font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_skills ?? 0}</p>
-                  <p className="text-[10px] text-gray-400 mt-1">
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-gray-500">Skills Detected</p>
+                  <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{dataQuality?.jobs_with_skills ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
                     {dataQuality?.total_jobs
-                      ? `${Math.round(((dataQuality.jobs_with_skills) / dataQuality.total_jobs) * 100)}% extracted`
+                      ? `${Math.round(((dataQuality.jobs_with_skills) / dataQuality.total_jobs) * 100)}%`
                       : "0%"}
                   </p>
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-indigo-500 font-semibold">Roles Normalized</p>
+                  <p className="mt-1 text-lg font-bold text-indigo-600 dark:text-indigo-400">{dataQuality?.roles_normalized ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Taxonomy classified</p>
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                  <p className="text-[11px] text-emerald-500 font-semibold">Locations Normalized</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">{dataQuality?.locations_normalized ?? 0}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Geocoded/Metros</p>
                 </div>
               </div>
             </div>

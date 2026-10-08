@@ -113,6 +113,15 @@ TAXONOMY: List[Dict[str, Any]] = [
         "category": "Programming Languages",
         "aliases": ["scala"],
     },
+    {
+        "name": "R",
+        "canonical_name": "R",
+        "category": "Programming Languages",
+        "aliases": ["r language", "r programming", "r developer"],
+        "strict_patterns": [
+            r"\b(?:r\s+programming|r\s+language|r\s+developer|r\s+(?:and|or)\s+python|python\s+(?:and|or)\s+r|r\s+scripting)\b"
+        ],
+    },
 
     # Frontend Frameworks & Libraries
     {
@@ -369,6 +378,15 @@ TAXONOMY: List[Dict[str, Any]] = [
     },
 
     # AI, Machine Learning & Data Science
+    {
+        "name": "Artificial Intelligence",
+        "canonical_name": "AI",
+        "category": "AI & Data",
+        "aliases": ["artificial intelligence", "ai systems", "genai", "generative ai"],
+        "strict_patterns": [
+            r"\b(?:artificial\s+intelligence|ai\/ml|ml\/ai|genai|generative\s+ai|ai\s+engineer|ai\s+solutions|applied\s+ai)\b"
+        ],
+    },
     {
         "name": "Machine Learning",
         "canonical_name": "Machine Learning",

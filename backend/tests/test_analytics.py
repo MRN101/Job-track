@@ -352,3 +352,246 @@ def test_duplicate_job_detection(db_session):
 
     total_in_db = db_session.query(Job).count()
     assert total_in_db == 1
+
+
+# ==========================================
+# 9. Strict False Positive Tests (Phase 22)
+# ==========================================
+
+def test_false_positives_all_short_skills():
+    """Verify strict word boundary matching for C, R, Go, .NET, AI, SQL, AWS."""
+    extractor = SkillExtractor()
+
+    # --- C & R ---
+    # Negative
+    neg_cr = "Looking for candidate with class C driver license and grade R early education."
+    detected = [s["canonical_name"] for s in extractor.extract_skills(description=neg_cr)]
+    assert "C" not in detected
+    assert "R" not in detected
+
+    # Positive
+    pos_cr = "Embedded C developer with R programming for statistical data modeling."
+    detected_pos = [s["canonical_name"] for s in extractor.extract_skills(description=pos_cr)]
+    assert "C" in detected_pos
+    assert "R" in detected_pos
+
+    # --- Go ---
+    # Negative
+    neg_go = "We must go forward and let nothing go wrong in our fast go-to-market."
+    detected_go = [s["canonical_name"] for s in extractor.extract_skills(description=neg_go)]
+    assert "Go" not in detected_go
+
+    # Positive
+    pos_go = "Senior Golang engineer writing Go backend services."
+    detected_pos_go = [s["canonical_name"] for s in extractor.extract_skills(description=pos_go)]
+    assert "Go" in detected_pos_go
+
+    # --- .NET ---
+    # Negative
+    neg_dotnet = "Visit our site at company.net or read the net proceeds."
+    detected_dotnet = [s["canonical_name"] for s in extractor.extract_skills(description=neg_dotnet)]
+    assert ".NET Core" not in detected_dotnet
+
+    # Positive
+    pos_dotnet = "C# .NET developer proficient with ASP.NET Core web APIs."
+    detected_pos_dotnet = [s["canonical_name"] for s in extractor.extract_skills(description=pos_dotnet)]
+    assert ".NET Core" in detected_pos_dotnet
+
+    # --- AI ---
+    # Negative
+    neg_ai = "We aim to assist and aid our customers with main solutions."
+    detected_ai = [s["canonical_name"] for s in extractor.extract_skills(description=neg_ai)]
+    assert "AI" not in detected_ai
+
+    # Positive
+    pos_ai = "Building modern AI systems and generative AI/ML architectures."
+    detected_pos_ai = [s["canonical_name"] for s in extractor.extract_skills(description=pos_ai)]
+    assert "AI" in detected_pos_ai
+
+    # --- SQL & AWS ---
+    # Positive
+    pos_sql_aws = "Strong SQL querying skills and deployment on AWS cloud infrastructure."
+    detected_sql_aws = [s["canonical_name"] for s in extractor.extract_skills(description=pos_sql_aws)]
+    assert "SQL" in detected_sql_aws
+    assert "AWS" in detected_sql_aws
+
+
+# ==========================================
+# 10. Role Taxonomy & Classification Tests
+# ==========================================
+
+def test_role_classification():
+    """Verify deterministic role taxonomy classifications."""
+    from app.analyzers.role_classifier import classify_role
+
+    # Software Engineering
+    f1, r1 = classify_role("Senior Backend Engineer (Python)")
+    assert f1 == "Software Engineering"
+    assert r1 == "Backend Engineer"
+
+    f2, r2 = classify_role("SDE 2")
+    assert f2 == "Software Engineering"
+    assert r2 == "Software Engineer"
+
+    f3, r3 = classify_role("Full Stack Web Developer")
+    assert f3 == "Software Engineering"
+    assert r3 == "Full Stack Engineer"
+
+    # AI & Data
+    f4, r4 = classify_role("Staff Machine Learning Engineer")
+    assert f4 == "AI & Machine Learning"
+    assert r4 == "Machine Learning Engineer"
+
+    f5, r5 = classify_role("Lead Data Scientist")
+    assert f5 == "AI & Machine Learning"
+    assert r5 == "Data Scientist"
+
+    f6, r6 = classify_role("Senior BI / Data Analyst")
+    assert f6 == "Data & Analytics"
+    assert r6 == "Data Analyst"
+
+    # DevOps
+    f7, r7 = classify_role("Site Reliability Engineer (SRE)")
+    assert f7 == "Cloud & DevOps"
+    assert r7 == "Site Reliability Engineer (SRE)"
+
+
+# ==========================================
+# 11. Location Normalization Tests
+# ==========================================
+
+def test_location_normalization():
+    """Verify normalization of Indian metros, global tech hubs, and remote flags."""
+    from app.analyzers.location_normalizer import normalize_location
+
+    # Bengaluru variants
+    loc1 = normalize_location("Bangalore, Karnataka")
+    assert loc1["normalized_city"] == "Bengaluru"
+    assert loc1["state"] == "Karnataka"
+    assert loc1["country"] == "India"
+
+    loc2 = normalize_location("bengaluru")
+    assert loc2["normalized_city"] == "Bengaluru"
+
+    # Bombay / Mumbai
+    loc3 = normalize_location("Bombay, MH")
+    assert loc3["normalized_city"] == "Mumbai"
+
+    # Calcutta / Kolkata
+    loc4 = normalize_location("Calcutta")
+    assert loc4["normalized_city"] == "Kolkata"
+
+    # Madras / Chennai
+    loc5 = normalize_location("Madras, Tamil Nadu")
+    assert loc5["normalized_city"] == "Chennai"
+
+    # Remote
+    loc6 = normalize_location("Remote - Worldwide")
+    assert loc6["is_remote"] is True
+    assert loc6["normalized_city"] == "Remote"
+
+    # Global Hub
+    loc7 = normalize_location("San Francisco, CA")
+    assert loc7["normalized_city"] == "San Francisco"
+    assert loc7["country"] == "United States"
+
+
+# ==========================================
+# 12. Candidate Skill Discovery Tests
+# ==========================================
+
+def test_candidate_skill_discovery():
+    """Verify discovery of new technologies without polluting canonical skills."""
+    from app.analyzers.candidate_extractor import extract_candidate_skills
+
+    known = {"Python", "JavaScript", "React", "PostgreSQL", "AWS"}
+    text = (
+        "Seeking an engineer skilled in Python and React. Experience with MCP protocol, "
+        "LangChain orchestration, and WASM compilation is a huge plus."
+    )
+    candidates = extract_candidate_skills(text, known)
+    cand_names = [c["name"].upper() for c in candidates]
+
+    assert "MCP" in cand_names
+    assert "WASM" in cand_names
+    assert "PYTHON" not in cand_names  # Already in known
+    assert "REACT" not in cand_names   # Already in known
+
+
+# ==========================================
+# 13. End-to-End Pipeline Integration Test (Phase 29)
+# ==========================================
+
+def test_end_to_end_pipeline(db_session):
+    """End-to-end integration: Collector -> DB -> Skills/Roles/Location -> Analysis Snapshot -> Trends."""
+    from app.services.analysis_service import run_analysis_snapshot
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Simulate collected jobs
+    raw_jobs = [
+        CollectedJob(
+            source="remotive",
+            external_id="e2e_1",
+            title="Senior Backend Engineer",
+            company_name="TechCorp India",
+            location="Bangalore, Karnataka",
+            country="India",
+            description="We build Python backend systems using FastAPI, PostgreSQL, and AWS.",
+            posted_at=now - timedelta(days=5),
+        ),
+        CollectedJob(
+            source="remotive",
+            external_id="e2e_2",
+            title="Full Stack Developer",
+            company_name="Innovate Ltd",
+            location="Bombay",
+            country="India",
+            description="Looking for Python and React developers with SQL and Docker.",
+            posted_at=now - timedelta(days=10),
+        ),
+    ]
+
+    # 2. Ingest
+    result = ingest_jobs(raw_jobs, db_session)
+    assert result.retrieved == 2
+    assert result.new_jobs == 2
+
+    # 3. Verify Database normalization
+    stored_jobs = db_session.query(Job).all()
+    assert len(stored_jobs) == 2
+
+    j1 = next(j for j in stored_jobs if j.external_id == "e2e_1")
+    assert j1.role_family == "Software Engineering"
+    assert j1.normalized_role == "Backend Engineer"
+    assert j1.normalized_city == "Bengaluru"
+
+    j2 = next(j for j in stored_jobs if j.external_id == "e2e_2")
+    assert j2.normalized_city == "Mumbai"
+
+    # 4. Verify Skills Extracted
+    j1_skills = [js.skill.canonical_name for js in j1.job_skills]
+    assert "Python" in j1_skills
+    assert "FastAPI" in j1_skills
+    assert "PostgreSQL" in j1_skills
+    assert "AWS" in j1_skills
+
+    # 5. Run Snapshot
+    snapshot = run_analysis_snapshot(
+        db=db_session,
+        country="India",
+        role="Software Engineering",
+        data_type="real",
+    )
+    assert snapshot.jobs_analyzed == 2
+
+    # 6. Query filtered query service
+    q = get_jobs_query(
+        db=db_session,
+        role_family="Software Engineering",
+        normalized_city="Bengaluru",
+        data_type="real",
+    )
+    assert q.count() == 1
+    assert q.first().external_id == "e2e_1"
+

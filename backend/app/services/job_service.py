@@ -10,8 +10,11 @@ from sqlalchemy import or_
 from app.models.job import Job
 from app.models.company import Company
 from app.models.skill import Skill, JobSkill, CandidateSkill
+from app.models.collection import CollectionRun
 from app.analyzers.taxonomy import TAXONOMY
 from app.analyzers.skill_extractor import get_skill_extractor, normalize_skill_name
+from app.analyzers.role_classifier import classify_role
+from app.analyzers.location_normalizer import normalize_location
 from app.collectors.base import CollectedJob, CollectionResult
 
 logger = logging.getLogger(__name__)
@@ -58,7 +61,7 @@ def ensure_skills_taxonomy(db: Session) -> int:
 
 
 def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionResult:
-    """Process and save collected jobs with robust deduplication and incremental tracking."""
+    """Process and save collected jobs with robust deduplication, role/location normalization, and skill extraction."""
     if not collected_jobs:
         return CollectionResult(source="none", retrieved=0)
 
@@ -124,6 +127,12 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
                     db.flush()
                 company_id = comp.id
 
+            # Classify role taxonomy
+            role_family, normalized_role = classify_role(item.title)
+
+            # Normalize location
+            loc_data = normalize_location(item.location, item.country or "India")
+
             # Create new job record
             new_job = Job(
                 source=item.source,
@@ -133,7 +142,12 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
                 company_name=item.company_name.strip() if item.company_name else None,
                 company_id=company_id,
                 location=item.location.strip() if item.location else None,
-                country=item.country or "India",
+                country=loc_data["country"] or item.country or "India",
+                role_family=role_family,
+                normalized_role=normalized_role,
+                normalized_city=loc_data["normalized_city"],
+                state=loc_data["state"],
+                is_remote=1 if loc_data["is_remote"] else 0,
                 description=item.description,
                 salary_min=item.salary_min,
                 salary_max=item.salary_max,
@@ -171,6 +185,36 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
                         extraction_method="dictionary",
                     )
                     db.add(job_skill)
+
+            # Discover and track candidate skills for emerging tech radar
+            from app.analyzers.candidate_extractor import extract_candidate_skills
+            full_text = f"{item.title or ''} {item.description or ''}"
+            cand_list = extract_candidate_skills(full_text, set(skills_map.keys()))
+            for cand in cand_list:
+                c_norm = cand["normalized_name"]
+                c_db = db.query(CandidateSkill).filter(
+                    (CandidateSkill.name.ilike(cand["name"])) | (CandidateSkill.normalized_name == c_norm)
+                ).first()
+                if c_db:
+                    c_db.job_count = (c_db.job_count or 0) + 1
+                    c_db.occurrences = (c_db.occurrences or 0) + 1
+                    c_db.last_seen_at = now_utc
+                    c_db.last_seen = now_utc
+                else:
+                    new_cand = CandidateSkill(
+                        name=cand["name"],
+                        normalized_name=c_norm,
+                        job_count=1,
+                        occurrences=1,
+                        confidence=cand["confidence"],
+                        status="candidate",
+                        first_seen_at=now_utc,
+                        last_seen_at=now_utc,
+                        first_seen=now_utc,
+                        last_seen=now_utc,
+                        source_method="heuristic",
+                    )
+                    db.add(new_cand)
 
             result.new_jobs += 1
 
@@ -215,10 +259,29 @@ def collect_and_ingest(
             details[src_name] = {"status": "error", "message": msg}
             continue
 
+        run_record = None
+        start_time = datetime.now(timezone.utc)
+        if db:
+            try:
+                run_record = CollectionRun(
+                    source=src_name,
+                    status="running",
+                    started_at=start_time,
+                )
+                db.add(run_record)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Could not persist initial CollectionRun for {src_name}: {e}")
+
         if not collector.is_configured():
             msg = f"{collector.source_name}: Not configured (API credentials missing)."
             combined_result.error_messages.append(msg)
             details[src_name] = {"status": "not_configured", "message": msg}
+            if db and run_record:
+                run_record.status = "failed"
+                run_record.completed_at = datetime.now(timezone.utc)
+                run_record.error_message = msg
+                db.commit()
             continue
 
         try:
@@ -239,6 +302,11 @@ def collect_and_ingest(
                     "duplicates": 0,
                     "message": "0 jobs returned from API query.",
                 }
+                if db and run_record:
+                    run_record.status = "completed"
+                    run_record.completed_at = datetime.now(timezone.utc)
+                    run_record.jobs_retrieved = 0
+                    db.commit()
                 continue
 
             # Ingest jobs into database
@@ -249,13 +317,25 @@ def collect_and_ingest(
             combined_result.errors += res.errors
             combined_result.error_messages.extend(res.error_messages)
 
+            run_status = "completed" if res.errors == 0 else "partial"
             details[src_name] = {
-                "status": "completed" if res.errors == 0 else "partial",
+                "status": run_status,
                 "retrieved": res.retrieved,
                 "new_jobs": res.new_jobs,
                 "duplicates": res.duplicates,
                 "errors": res.errors,
             }
+
+            if db and run_record:
+                run_record.status = run_status
+                run_record.completed_at = datetime.now(timezone.utc)
+                run_record.jobs_retrieved = res.retrieved
+                run_record.new_jobs = res.new_jobs
+                run_record.duplicates = res.duplicates
+                run_record.failed_jobs = res.errors
+                if res.error_messages:
+                    run_record.error_message = "; ".join(res.error_messages[:3])
+                db.commit()
 
         except Exception as e:
             combined_result.errors += 1
@@ -263,6 +343,12 @@ def collect_and_ingest(
             combined_result.error_messages.append(err_msg)
             details[src_name] = {"status": "failed", "error": str(e)}
             logger.error(f"Collector '{src_name}' failed: {e}")
+
+            if db and run_record:
+                run_record.status = "failed"
+                run_record.completed_at = datetime.now(timezone.utc)
+                run_record.error_message = str(e)
+                db.commit()
 
     combined_result.details = details
     return combined_result

@@ -14,10 +14,14 @@ from app.schemas.analytics import (
     CollectionRequest,
     CollectionStatus,
     TrendsResponse,
+    CollectionRunItem,
+    CandidateSkillItem,
+    AlertItem,
 )
 from app.models.job import Job
-from app.models.skill import Skill, JobSkill
+from app.models.skill import Skill, JobSkill, CandidateSkill
 from app.models.company import Company
+from app.models.collection import CollectionRun
 from app.services.job_service import collect_and_ingest, ensure_skills_taxonomy
 from app.services.analysis_service import (
     run_analysis_snapshot,
@@ -290,6 +294,16 @@ def get_data_quality(db: Session = Depends(get_db)):
     jobs_with_skills = (
         db.query(func.count(distinct(JobSkill.job_id))).scalar() or 0
     )
+    roles_normalized = (
+        db.query(Job).filter(Job.normalized_role.isnot(None)).count()
+    )
+    locations_normalized = (
+        db.query(Job).filter(Job.normalized_city.isnot(None)).count()
+    )
+
+    duplicate_records_prevented = (
+        db.query(func.coalesce(func.sum(CollectionRun.duplicates), 0)).scalar() or 0
+    )
 
     # Source breakdown
     source_counts = (
@@ -312,9 +326,123 @@ def get_data_quality(db: Session = Depends(get_db)):
         jobs_with_description=jobs_with_description,
         jobs_with_salary=jobs_with_salary,
         jobs_with_skills=jobs_with_skills,
-        duplicate_records_prevented=0,  # Updated during ingest
+        roles_normalized=roles_normalized,
+        locations_normalized=locations_normalized,
+        duplicate_records_prevented=duplicate_records_prevented,
         sources_breakdown=sources_breakdown,
         last_collection_per_source=last_collection_per_source,
+    )
+
+
+@router.get("/collections/history", response_model=List[CollectionRunItem])
+def get_collection_history(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """List historical collection runs with status and metrics."""
+    runs = (
+        db.query(CollectionRun)
+        .order_by(CollectionRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return runs
+
+
+@router.get("/scheduler/status")
+def get_scheduler_status_endpoint():
+    """Get status of background scheduler."""
+    from app.services.scheduler import get_scheduler_status
+    return get_scheduler_status()
+
+
+@router.post("/scheduler/trigger")
+def trigger_scheduled_collection():
+    """Trigger the scheduled collection pipeline immediately in background."""
+    from app.services.scheduler import trigger_immediate_collection
+    return trigger_immediate_collection()
+
+
+@router.post("/scheduler/interval")
+def set_scheduler_interval_endpoint(frequency: str = Query("daily", regex="^(daily|weekly|manual)$")):
+    """Update background collection frequency."""
+    from app.services.scheduler import set_scheduler_interval
+    set_scheduler_interval(frequency)
+    return {"status": "success", "frequency": frequency}
+
+
+@router.get("/candidate-skills", response_model=List[CandidateSkillItem])
+def get_candidate_skills(
+    status: Optional[str] = Query("candidate", description="candidate, approved, or rejected"),
+    min_jobs: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """List discovered candidate skills for emerging tech radar."""
+    query = db.query(CandidateSkill)
+    if status and status.lower() != "all":
+        query = query.filter(CandidateSkill.status == status)
+    query = query.filter(CandidateSkill.job_count >= min_jobs)
+    return query.order_by(CandidateSkill.job_count.desc()).limit(limit).all()
+
+
+@router.post("/candidate-skills/{cand_id}/approve")
+def approve_candidate_skill(cand_id: int, db: Session = Depends(get_db)):
+    """Approve a candidate skill and integrate it into the canonical taxonomy."""
+    cand = db.query(CandidateSkill).filter(CandidateSkill.id == cand_id).first()
+    if not cand:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Candidate skill not found")
+
+    cand.status = "approved"
+    cand.approved = 1
+
+    # Check if already in canonical Skill table
+    existing_skill = db.query(Skill).filter(
+        (Skill.name.ilike(cand.name)) | (Skill.canonical_name.ilike(cand.name))
+    ).first()
+
+    if not existing_skill:
+        new_skill = Skill(
+            name=cand.name,
+            canonical_name=cand.name,
+            category="Emerging Technologies",
+            description=f"Approved emerging skill: {cand.name}",
+        )
+        db.add(new_skill)
+
+    db.commit()
+    return {"status": "success", "message": f"Skill '{cand.name}' approved into canonical taxonomy."}
+
+
+@router.post("/candidate-skills/{cand_id}/reject")
+def reject_candidate_skill(cand_id: int, db: Session = Depends(get_db)):
+    """Reject a candidate skill to prevent it from cluttering recommendations."""
+    cand = db.query(CandidateSkill).filter(CandidateSkill.id == cand_id).first()
+    if not cand:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Candidate skill not found")
+
+    cand.status = "rejected"
+    cand.approved = -1
+    db.commit()
+    return {"status": "success", "message": f"Candidate skill '{cand.name}' rejected."}
+
+
+@router.get("/alerts", response_model=List[AlertItem])
+def get_alerts(
+    role: Optional[str] = "Software Engineer",
+    country: Optional[str] = "Worldwide",
+    growth_threshold: float = Query(3.0, description="Minimum percentage point increase"),
+    db: Session = Depends(get_db),
+):
+    """Personal alerts for significant skill surges and emerging technologies."""
+    from app.services.alert_service import evaluate_alerts
+    return evaluate_alerts(
+        db=db,
+        growth_threshold_pp=growth_threshold,
+        role=role,
+        country=country,
     )
 
 

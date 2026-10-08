@@ -86,9 +86,54 @@ class DataQualityMetrics(BaseModel):
     jobs_with_description: int = 0
     jobs_with_salary: int = 0
     jobs_with_skills: int = 0
+    roles_normalized: int = 0
+    locations_normalized: int = 0
     duplicate_records_prevented: int = 0
     sources_breakdown: Dict[str, int] = {}
     last_collection_per_source: Dict[str, Optional[datetime]] = {}
+
+
+class CollectionRunItem(BaseModel):
+    """Historical collection run record."""
+    id: int
+    source: str
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    jobs_retrieved: int = 0
+    new_jobs: int = 0
+    updated_jobs: int = 0
+    duplicates: int = 0
+    failed_jobs: int = 0
+    skills_extracted: int = 0
+    error_message: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CandidateSkillItem(BaseModel):
+    """Candidate emerging skill item."""
+    id: int
+    name: str
+    normalized_name: Optional[str] = None
+    job_count: int = 1
+    occurrences: int = 1
+    confidence: float = 0.8
+    status: str = "candidate"
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AlertItem(BaseModel):
+    """Personal job intelligence alert."""
+    type: str
+    title: str
+    message: str
+    severity: str  # "info", "success", "warning"
+    timestamp: datetime
+    data: Optional[Dict[str, Any]] = None
 
 
 class CollectionRequest(BaseModel):

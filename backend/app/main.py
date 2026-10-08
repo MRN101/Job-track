@@ -64,6 +64,14 @@ def create_app() -> FastAPI:
                 logger.info(f"Seeded {count} canonical taxonomy skills.")
         logger.info("Database and taxonomy initialized.")
 
+        # Start background collection scheduler (daily interval by default)
+        try:
+            from app.services.scheduler import init_scheduler
+            init_scheduler(frequency="daily")
+            logger.info("Background historical collection scheduler initialized.")
+        except Exception as e:
+            logger.warning(f"Could not initialize background scheduler: {e}")
+
     @app.get("/")
     async def root():
         """Root endpoint with quick API reference and documentation links."""

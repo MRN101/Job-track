@@ -52,18 +52,23 @@ class JobSkill(Base):
 
 
 class CandidateSkill(Base):
-    """Skills detected by LLM or heuristics that are not yet in the canonical taxonomy."""
+    """Skills detected by NLP/heuristics that are not yet in the canonical taxonomy."""
 
     __tablename__ = "candidate_skills"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False, unique=True, index=True)
+    normalized_name = Column(String(255), nullable=True, index=True)
     occurrences = Column(Integer, nullable=False, default=1)
+    job_count = Column(Integer, nullable=False, default=1)
     confidence = Column(Float, nullable=False, default=0.8)
+    status = Column(String(20), nullable=False, default="candidate", index=True)  # candidate, approved, rejected
     source_method = Column(String(50), nullable=False, default="heuristic")
     first_seen = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     last_seen = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    first_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     approved = Column(Integer, nullable=False, default=0)  # 0=pending, 1=approved, -1=rejected
 
     def __repr__(self):
-        return f"<CandidateSkill(name='{self.name}', occurrences={self.occurrences}, approved={self.approved})>"
+        return f"<CandidateSkill(name='{self.name}', status='{self.status}', job_count={self.job_count})>"
