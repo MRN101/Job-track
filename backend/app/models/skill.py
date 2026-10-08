@@ -1,9 +1,10 @@
 """Skill models."""
 
 from sqlalchemy import (
-    Column, Integer, String, Text, Float, ForeignKey, Index
+    Column, Integer, String, Text, Float, DateTime, ForeignKey, Index
 )
 from sqlalchemy.orm import relationship
+from datetime import datetime, timezone
 
 from app.database import Base
 
@@ -51,15 +52,18 @@ class JobSkill(Base):
 
 
 class CandidateSkill(Base):
-    """Skills detected by LLM that are not yet in the canonical taxonomy."""
+    """Skills detected by LLM or heuristics that are not yet in the canonical taxonomy."""
 
     __tablename__ = "candidate_skills"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
     occurrences = Column(Integer, nullable=False, default=1)
-    source_method = Column(String(50), nullable=False, default="llm")
+    confidence = Column(Float, nullable=False, default=0.8)
+    source_method = Column(String(50), nullable=False, default="heuristic")
+    first_seen = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     approved = Column(Integer, nullable=False, default=0)  # 0=pending, 1=approved, -1=rejected
 
     def __repr__(self):
-        return f"<CandidateSkill(name='{self.name}', occurrences={self.occurrences})>"
+        return f"<CandidateSkill(name='{self.name}', occurrences={self.occurrences}, approved={self.approved})>"

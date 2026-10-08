@@ -1,4 +1,4 @@
-"""Remotive API Collector for developer and tech jobs."""
+"""Remotive API Collector for live developer and tech jobs."""
 
 import re
 import html
@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.collectors.base import BaseCollector, CollectedJob
+from app.services.salary_service import parse_and_normalize_salary
 
 logger = logging.getLogger(__name__)
 
@@ -25,37 +26,8 @@ def clean_html(text: Optional[str]) -> str:
     return cleaned
 
 
-def parse_salary(salary_str: Optional[str]):
-    """Extract salary min, max, currency from salary string if possible."""
-    if not salary_str:
-        return None, None, None
-    s = salary_str.strip()
-    currency = "USD"
-    if "€" in s or "EUR" in s:
-        currency = "EUR"
-    elif "£" in s or "GBP" in s:
-        currency = "GBP"
-    elif "₹" in s or "INR" in s:
-        currency = "INR"
-
-    # Find numbers like 120,000 or 120k
-    numbers = []
-    matches = re.findall(r"(\d+(?:,\d+)*(?:\.\d+)?)\s*(k|kilo)?", s, re.IGNORECASE)
-    for num_str, multiplier in matches:
-        num = float(num_str.replace(",", ""))
-        if multiplier.lower() in ("k", "kilo"):
-            num *= 1000
-        numbers.append(num)
-
-    if len(numbers) >= 2:
-        return min(numbers), max(numbers), currency
-    elif len(numbers) == 1:
-        return numbers[0], numbers[0], currency
-    return None, None, None
-
-
 class RemotiveCollector(BaseCollector):
-    """Collector for Remotive public jobs feed."""
+    """Collector for Remotive public jobs feed (real, live data source)."""
 
     API_URL = "https://remotive.com/api/remote-jobs"
 
@@ -64,6 +36,7 @@ class RemotiveCollector(BaseCollector):
         return "remotive"
 
     def is_configured(self) -> bool:
+        """Remotive public API requires no key and is always available."""
         return True
 
     def collect(
@@ -76,7 +49,7 @@ class RemotiveCollector(BaseCollector):
     ) -> List[CollectedJob]:
         """Collect live developer jobs from Remotive."""
         params = {"category": "software-dev"}
-        if role and role.strip():
+        if role and role.strip() and role.lower() not in ("all", "all roles"):
             params["search"] = role.strip()
         if max_results:
             params["limit"] = min(max_results, 100)
@@ -92,15 +65,19 @@ class RemotiveCollector(BaseCollector):
                 items = data.get("jobs", [])
 
                 for item in items[:max_results]:
-                    # Extract fields
                     ext_id = str(item.get("id"))
                     title = item.get("title", "Untitled Job")
                     company = item.get("company_name", "")
                     job_loc = item.get("candidate_required_location") or "Remote"
                     raw_desc = item.get("description", "")
                     desc_text = clean_html(raw_desc)
-                    sal_min, sal_max, sal_curr = parse_salary(item.get("salary"))
+                    raw_salary = item.get("salary")
                     job_type = item.get("job_type")
+
+                    # Parse and normalize salary
+                    sal_min, sal_max, sal_curr, sal_period, sal_norm = parse_and_normalize_salary(
+                        raw_text=raw_salary
+                    )
 
                     # Parse publication date
                     posted_at = None
@@ -114,15 +91,18 @@ class RemotiveCollector(BaseCollector):
                     jobs.append(
                         CollectedJob(
                             source=self.source_name,
+                            data_type="real",
                             external_id=ext_id,
                             title=title,
                             company_name=company,
                             location=job_loc,
-                            country=country if country and country != "Worldwide" else "Remote",
+                            country=country if country and country.lower() not in ("worldwide", "all") else "Remote",
                             description=desc_text,
                             salary_min=sal_min,
                             salary_max=sal_max,
                             salary_currency=sal_curr,
+                            salary_period=sal_period,
+                            salary_normalized=sal_norm,
                             employment_type=job_type,
                             experience_level=experience_level,
                             posted_at=posted_at,
@@ -130,8 +110,9 @@ class RemotiveCollector(BaseCollector):
                         )
                     )
 
-            logger.info(f"Collected {len(jobs)} jobs from Remotive.")
+            logger.info(f"Collected {len(jobs)} live jobs from Remotive.")
         except Exception as e:
             logger.error(f"Error collecting from Remotive: {e}")
+            raise
 
         return jobs

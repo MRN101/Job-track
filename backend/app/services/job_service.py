@@ -1,7 +1,8 @@
-"""Job data ingestion and collection service."""
+"""Job data ingestion, deduplication, and collection service."""
 
+import hashlib
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -10,10 +11,19 @@ from app.models.job import Job
 from app.models.company import Company
 from app.models.skill import Skill, JobSkill, CandidateSkill
 from app.analyzers.taxonomy import TAXONOMY
-from app.analyzers.skill_extractor import get_skill_extractor
-from app.collectors import get_collector, CollectedJob, CollectionResult
+from app.analyzers.skill_extractor import get_skill_extractor, normalize_skill_name
+from app.collectors.base import CollectedJob, CollectionResult
 
 logger = logging.getLogger(__name__)
+
+
+def compute_job_content_hash(company_name: Optional[str], title: str, location: Optional[str]) -> str:
+    """Compute deterministic SHA-256 hash for deduplication fallback."""
+    c = (company_name or "").strip().lower()
+    t = (title or "").strip().lower()
+    l = (location or "").strip().lower()
+    raw = f"{c}|{t}|{l}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def ensure_skills_taxonomy(db: Session) -> int:
@@ -48,8 +58,11 @@ def ensure_skills_taxonomy(db: Session) -> int:
 
 
 def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionResult:
-    """Process and save collected jobs, extracting and linking skills."""
-    # Ensure taxonomy is loaded
+    """Process and save collected jobs with robust deduplication and incremental tracking."""
+    if not collected_jobs:
+        return CollectionResult(source="none", retrieved=0)
+
+    # Ensure canonical taxonomy is loaded
     ensure_skills_taxonomy(db)
 
     # Cache canonical skills by name and canonical_name
@@ -57,7 +70,9 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
     for s in db.query(Skill).all():
         skills_map[s.name.lower()] = s
         skills_map[s.canonical_name.lower()] = s
+
     extractor = get_skill_extractor()
+    now_utc = datetime.now(timezone.utc)
 
     result = CollectionResult(
         source=collected_jobs[0].source if collected_jobs else "unknown",
@@ -66,7 +81,9 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
 
     for item in collected_jobs:
         try:
-            # Deduplication check
+            content_hash = compute_job_content_hash(item.company_name, item.title, item.location)
+
+            # 1. Deduplication check: by (source, external_id)
             existing = None
             if item.external_id:
                 existing = db.query(Job).filter(
@@ -74,63 +91,79 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
                     Job.external_id == item.external_id,
                 ).first()
 
-            if not existing and item.title and item.company_name:
+            # 2. Fallback deduplication: by content hash or title + company
+            if not existing and content_hash:
                 existing = db.query(Job).filter(
-                    Job.title == item.title,
-                    Job.company_name == item.company_name,
+                    Job.content_hash == content_hash
                 ).first()
 
+            if not existing and item.title and item.company_name:
+                existing = db.query(Job).filter(
+                    Job.title.ilike(item.title.strip()),
+                    Job.company_name.ilike(item.company_name.strip()),
+                ).first()
+
+            # If job already exists, increment deduplication count and update last_seen_at
             if existing:
+                existing.last_seen_at = now_utc
                 result.duplicates += 1
                 continue
 
             # Find or create company
             company_id = None
             if item.company_name:
-                comp = db.query(Company).filter(Company.name == item.company_name).first()
+                comp_norm = item.company_name.lower().strip()
+                comp = db.query(Company).filter(Company.normalized_name == comp_norm).first()
                 if not comp:
                     comp = Company(
-                        name=item.company_name,
-                        normalized_name=item.company_name.lower().strip(),
+                        name=item.company_name.strip(),
+                        normalized_name=comp_norm,
                         location=item.location,
                     )
                     db.add(comp)
                     db.flush()
                 company_id = comp.id
 
-            # Create job record
+            # Create new job record
             new_job = Job(
                 source=item.source,
+                data_type=item.data_type or "real",
                 external_id=item.external_id,
-                title=item.title,
-                company_name=item.company_name,
+                title=item.title.strip(),
+                company_name=item.company_name.strip() if item.company_name else None,
                 company_id=company_id,
-                location=item.location,
+                location=item.location.strip() if item.location else None,
                 country=item.country or "India",
                 description=item.description,
                 salary_min=item.salary_min,
                 salary_max=item.salary_max,
                 salary_currency=item.salary_currency or "INR",
+                salary_period=item.salary_period,
+                salary_normalized=item.salary_normalized,
                 employment_type=item.employment_type or "full_time",
                 experience_level=item.experience_level,
-                posted_at=item.posted_at or datetime.now(timezone.utc),
+                posted_at=item.posted_at or now_utc,
                 url=item.url,
-                collected_at=datetime.now(timezone.utc),
+                collected_at=now_utc,
+                first_seen_at=now_utc,
+                last_seen_at=now_utc,
+                content_hash=content_hash,
             )
             db.add(new_job)
             db.flush()
 
-            # Extract skills
+            # Extract skills using strict extractor
             extracted = extractor.extract_skills(
                 title=item.title or "",
                 description=item.description or "",
             )
 
+            linked_skill_ids = set()
             for sk in extracted:
                 canonical = sk["canonical_name"].lower()
                 skill_obj = skills_map.get(canonical)
-                if skill_obj:
-                    # Link skill to job
+                if skill_obj and skill_obj.id not in linked_skill_ids:
+                    linked_skill_ids.add(skill_obj.id)
                     job_skill = JobSkill(
                         job_id=new_job.id,
                         skill_id=skill_obj.id,
@@ -143,7 +176,7 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
 
         except Exception as e:
             result.errors += 1
-            result.error_messages.append(str(e))
+            result.error_messages.append(f"Error ingesting '{item.title}': {str(e)}")
             logger.error(f"Error ingesting job '{item.title}': {e}")
 
     db.commit()
@@ -151,38 +184,85 @@ def ingest_jobs(collected_jobs: List[CollectedJob], db: Session) -> CollectionRe
 
 
 def collect_and_ingest(
-    source: str = "sample",
-    country: str = "India",
+    source: str = "remotive",
+    country: str = "Worldwide",
     role: str = "Software Engineer",
     location: Optional[str] = None,
     experience_level: Optional[str] = None,
     max_results: int = 50,
     db: Optional[Session] = None,
 ) -> CollectionResult:
-    """Collect jobs using specified source and ingest into database."""
-    collector = get_collector(source)
-    if not collector:
-        res = CollectionResult(source=source)
-        res.errors = 1
-        res.error_messages.append(f"Collector '{source}' not found or unsupported.")
-        return res
+    """Collect jobs using specified source or 'all' sources, and ingest into database.
+    Catches source errors gracefully without crashing the overall collection process.
+    """
+    sources_to_run = []
+    if source in ("all", "all_real"):
+        sources_to_run = ["remotive", "adzuna"]
+    else:
+        sources_to_run = [source]
 
-    collected_jobs = collector.collect(
-        country=country,
-        role=role,
-        location=location,
-        experience_level=experience_level,
-        max_results=max_results,
-    )
+    combined_result = CollectionResult(source=source)
+    details: Dict[str, Any] = {}
 
-    if not collected_jobs:
-        return CollectionResult(
-            source=source,
-            retrieved=0,
-            new_jobs=0,
-            duplicates=0,
-            errors=0 if collector.is_configured() else 1,
-            error_messages=[] if collector.is_configured() else ["Collector not configured with valid API keys."],
-        )
+    from app.collectors import get_collector
 
-    return ingest_jobs(collected_jobs, db)
+    for src_name in sources_to_run:
+        collector = get_collector(src_name)
+        if not collector:
+            combined_result.errors += 1
+            msg = f"Collector '{src_name}' not found or unsupported."
+            combined_result.error_messages.append(msg)
+            details[src_name] = {"status": "error", "message": msg}
+            continue
+
+        if not collector.is_configured():
+            msg = f"{collector.source_name}: Not configured (API credentials missing)."
+            combined_result.error_messages.append(msg)
+            details[src_name] = {"status": "not_configured", "message": msg}
+            continue
+
+        try:
+            logger.info(f"Running collector '{src_name}'...")
+            collected_jobs = collector.collect(
+                country=country,
+                role=role,
+                location=location,
+                experience_level=experience_level,
+                max_results=max_results,
+            )
+
+            if not collected_jobs:
+                details[src_name] = {
+                    "status": "completed",
+                    "retrieved": 0,
+                    "new_jobs": 0,
+                    "duplicates": 0,
+                    "message": "0 jobs returned from API query.",
+                }
+                continue
+
+            # Ingest jobs into database
+            res = ingest_jobs(collected_jobs, db)
+            combined_result.retrieved += res.retrieved
+            combined_result.new_jobs += res.new_jobs
+            combined_result.duplicates += res.duplicates
+            combined_result.errors += res.errors
+            combined_result.error_messages.extend(res.error_messages)
+
+            details[src_name] = {
+                "status": "completed" if res.errors == 0 else "partial",
+                "retrieved": res.retrieved,
+                "new_jobs": res.new_jobs,
+                "duplicates": res.duplicates,
+                "errors": res.errors,
+            }
+
+        except Exception as e:
+            combined_result.errors += 1
+            err_msg = f"{src_name}: Failed — {str(e)}"
+            combined_result.error_messages.append(err_msg)
+            details[src_name] = {"status": "failed", "error": str(e)}
+            logger.error(f"Collector '{src_name}' failed: {e}")
+
+    combined_result.details = details
+    return combined_result

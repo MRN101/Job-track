@@ -12,6 +12,7 @@ interface SkillInJob {
 interface Job {
   id: number;
   source: string;
+  data_type: string;
   external_id?: string;
   title: string;
   company_name?: string;
@@ -21,6 +22,8 @@ interface Job {
   salary_min?: number;
   salary_max?: number;
   salary_currency?: string;
+  salary_period?: string;
+  salary_normalized?: number;
   employment_type?: string;
   experience_level?: string;
   posted_at?: string;
@@ -35,6 +38,8 @@ export default function JobsPage() {
   const [pageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [isDemoMode, setIsDemoMode] = useState(false);
   const [sortBy, setSortBy] = useState("newest");
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -44,6 +49,7 @@ export default function JobsPage() {
   useEffect(() => {
     let ignore = false;
     async function fetchData() {
+      setLoading(true);
       try {
         const params = new URLSearchParams({
           page: page.toString(),
@@ -52,6 +58,8 @@ export default function JobsPage() {
         });
         if (submittedSearch.trim()) params.append("search", submittedSearch.trim());
         if (roleFilter.trim()) params.append("role", roleFilter.trim());
+        if (sourceFilter !== "all") params.append("source", sourceFilter);
+        if (isDemoMode) params.append("include_demo", "true");
 
         const res = await fetch(`/api/jobs?${params.toString()}`);
         if (res.ok && !ignore) {
@@ -69,7 +77,7 @@ export default function JobsPage() {
     return () => {
       ignore = true;
     };
-  }, [page, sortBy, roleFilter, refreshKey, pageSize, submittedSearch]);
+  }, [page, sortBy, roleFilter, sourceFilter, isDemoMode, refreshKey, pageSize, submittedSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +131,49 @@ export default function JobsPage() {
             />
           </svg>
         </form>
+
+        {/* Mode Switcher */}
+        <div className="inline-flex p-1 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-semibold shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setIsDemoMode(false);
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg transition ${
+              !isDemoMode ? "bg-white dark:bg-gray-900 text-blue-600 shadow-sm" : "text-gray-500"
+            }`}
+          >
+            Real
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsDemoMode(true);
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg transition ${
+              isDemoMode ? "bg-amber-500 text-white shadow-sm" : "text-gray-500"
+            }`}
+          >
+            Demo
+          </button>
+        </div>
+
+        {/* Source Filter */}
+        <select
+          value={sourceFilter}
+          onChange={(e) => {
+            setSourceFilter(e.target.value);
+            setPage(1);
+          }}
+          className="px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All Sources</option>
+          <option value="remotive">Remotive</option>
+          <option value="adzuna">Adzuna</option>
+          {isDemoMode && <option value="sample">Sample</option>}
+        </select>
 
         {/* Role Selector */}
         <select

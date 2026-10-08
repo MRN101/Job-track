@@ -15,12 +15,16 @@ class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String(50), nullable=True, default="all")  # all, adzuna, remotive, sample
+    data_type = Column(String(20), nullable=False, default="real", index=True)  # real, demo
     country = Column(String(100), nullable=True)
     role = Column(String(255), nullable=True)
     location = Column(String(255), nullable=True)
     experience_level = Column(String(50), nullable=True)
-    start_date = Column(DateTime, nullable=True)
-    end_date = Column(DateTime, nullable=True)
+    time_period_start = Column(DateTime, nullable=True)
+    time_period_end = Column(DateTime, nullable=True)
+    start_date = Column(DateTime, nullable=True)  # Kept for backward compatibility
+    end_date = Column(DateTime, nullable=True)    # Kept for backward compatibility
     jobs_analyzed = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime,
@@ -35,7 +39,7 @@ class AnalysisRun(Base):
     def __repr__(self):
         return (
             f"<AnalysisRun(id={self.id}, role='{self.role}', "
-            f"jobs_analyzed={self.jobs_analyzed})>"
+            f"type='{self.data_type}', jobs_analyzed={self.jobs_analyzed})>"
         )
 
 

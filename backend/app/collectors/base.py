@@ -1,7 +1,7 @@
 """Base collector interface for job data sources."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -10,6 +10,7 @@ from datetime import datetime
 class CollectedJob:
     """Standardized job data from any source."""
     source: str
+    data_type: str = "real"  # "real" or "demo"
     external_id: Optional[str] = None
     title: str = ""
     company_name: Optional[str] = None
@@ -19,6 +20,8 @@ class CollectedJob:
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None
     salary_currency: Optional[str] = None
+    salary_period: Optional[str] = None  # hour, day, month, year
+    salary_normalized: Optional[float] = None  # Normalized annual salary
     employment_type: Optional[str] = None
     experience_level: Optional[str] = None
     posted_at: Optional[datetime] = None
@@ -34,6 +37,7 @@ class CollectionResult:
     duplicates: int = 0
     errors: int = 0
     error_messages: List[str] = field(default_factory=list)
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseCollector(ABC):

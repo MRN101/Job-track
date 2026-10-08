@@ -296,17 +296,25 @@ class SampleCollector(BaseCollector):
             days_ago = (i % 20) + 1
             posted_at = now - timedelta(days=days_ago)
 
+            s_min = item.get("salary_min")
+            s_max = item.get("salary_max")
+            s_curr = item.get("salary_currency", "INR")
+            s_norm = float(s_max or s_min) if (s_max or s_min) else None
+
             job = CollectedJob(
                 source=self.source_name,
+                data_type="demo",
                 external_id=f"sample_{i+1:04d}",
                 title=item["title"],
                 company_name=item["company_name"],
                 location=item["location"],
                 country=item["country"],
                 description=item["description"],
-                salary_min=item.get("salary_min"),
-                salary_max=item.get("salary_max"),
-                salary_currency=item.get("salary_currency", "INR"),
+                salary_min=s_min,
+                salary_max=s_max,
+                salary_currency=s_curr,
+                salary_period="year",
+                salary_normalized=s_norm,
                 employment_type=item.get("employment_type", "full_time"),
                 experience_level=item.get("experience_level", experience_level or "0-2 years"),
                 posted_at=posted_at,

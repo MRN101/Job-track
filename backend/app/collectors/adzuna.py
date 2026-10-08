@@ -102,17 +102,25 @@ class AdzunaCollector(BaseCollector):
                     location_info = item.get("location", {})
                     loc_name = location_info.get("display_name") if isinstance(location_info, dict) else str(location_info)
 
+                    s_min = item.get("salary_min")
+                    s_max = item.get("salary_max")
+                    s_curr = "INR" if country_code == "in" else ("GBP" if country_code == "gb" else "USD")
+                    s_norm = float(s_max or s_min) if (s_max or s_min) else None
+
                     job = CollectedJob(
                         source=self.source_name,
+                        data_type="real",
                         external_id=str(item.get("id", "")),
                         title=item.get("title", ""),
                         company_name=company_name,
                         location=loc_name,
                         country=country,
                         description=item.get("description", ""),
-                        salary_min=item.get("salary_min"),
-                        salary_max=item.get("salary_max"),
-                        salary_currency="INR" if country_code == "in" else ("GBP" if country_code == "gb" else "USD"),
+                        salary_min=s_min,
+                        salary_max=s_max,
+                        salary_currency=s_curr,
+                        salary_period="year",
+                        salary_normalized=s_norm,
                         employment_type=item.get("contract_time"),
                         experience_level=experience_level,
                         posted_at=posted_at,
@@ -122,5 +130,6 @@ class AdzunaCollector(BaseCollector):
 
         except Exception as e:
             logger.error(f"Error fetching jobs from Adzuna: {e}")
+            raise
 
         return jobs

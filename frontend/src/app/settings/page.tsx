@@ -316,15 +316,15 @@ export default function SettingsPage() {
             disabled={collecting}
             className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm disabled:opacity-50"
           >
-            {collecting ? "Collecting..." : "Run Job Collection"}
+            {collecting ? "Collecting..." : `Collect from ${selectedSource}`}
           </button>
 
           <button
             onClick={handleSeedSample}
             disabled={collecting}
-            className="px-4 py-2.5 rounded-xl text-xs font-bold border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition"
           >
-            Re-Seed Sample Dataset
+            Load Demo Dataset (Sample Data)
           </button>
         </div>
 

@@ -14,6 +14,8 @@ class JobBase(BaseModel):
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None
     salary_currency: Optional[str] = None
+    salary_period: Optional[str] = None
+    salary_normalized: Optional[float] = None
     employment_type: Optional[str] = None
     experience_level: Optional[str] = None
     url: Optional[str] = None
@@ -22,6 +24,7 @@ class JobBase(BaseModel):
 class JobCreate(JobBase):
     """Schema for creating a job."""
     source: str
+    data_type: str = "real"
     external_id: Optional[str] = None
     description: Optional[str] = None
     posted_at: Optional[datetime] = None
@@ -41,10 +44,13 @@ class JobResponse(JobBase):
     """Schema for returning a job."""
     id: int
     source: str
+    data_type: str = "real"
     external_id: Optional[str] = None
     description: Optional[str] = None
     posted_at: Optional[datetime] = None
     collected_at: datetime
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
     skills: List[SkillInJob] = []
 
     model_config = {"from_attributes": True}
@@ -56,6 +62,7 @@ class JobListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    data_type: str = "real"
 
 
 class JobFilters(BaseModel):
@@ -66,6 +73,9 @@ class JobFilters(BaseModel):
     experience_level: Optional[str] = None
     company: Optional[str] = None
     skill: Optional[str] = None
+    source: Optional[str] = None
+    data_type: Optional[str] = None
+    include_demo: bool = False
     date_from: Optional[datetime] = None
     date_to: Optional[datetime] = None
     search: Optional[str] = None

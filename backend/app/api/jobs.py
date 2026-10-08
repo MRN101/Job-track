@@ -1,11 +1,13 @@
 """Jobs API endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.schemas.job import JobResponse, JobListResponse
+from app.models.job import Job
+from app.schemas.job import JobResponse, JobListResponse, SkillInJob
+from app.services.query_service import get_jobs_query
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -17,26 +19,30 @@ def list_jobs(
     location: Optional[str] = None,
     experience_level: Optional[str] = None,
     company: Optional[str] = None,
+    source: Optional[str] = None,
+    time_period: Optional[str] = None,
+    include_demo: bool = Query(False, description="Set to True to inspect demo jobs"),
     search: Optional[str] = None,
     sort_by: str = Query("newest", regex="^(newest|salary|relevance)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """List jobs with optional filters and pagination."""
-    from app.models.job import Job
+    """List jobs with optional filters, search, and pagination.
+    Defaults to real jobs only unless include_demo=True.
+    """
+    query = get_jobs_query(
+        db=db,
+        country=country,
+        role=role,
+        location=location,
+        experience_level=experience_level,
+        source=source,
+        time_period=time_period,
+        include_demo=include_demo,
+        data_type="demo" if include_demo else "real",
+    )
 
-    query = db.query(Job)
-
-    # Apply filters
-    if country:
-        query = query.filter(Job.country.ilike(f"%{country}%"))
-    if role:
-        query = query.filter(Job.title.ilike(f"%{role}%"))
-    if location:
-        query = query.filter(Job.location.ilike(f"%{location}%"))
-    if experience_level:
-        query = query.filter(Job.experience_level == experience_level)
     if company:
         query = query.filter(Job.company_name.ilike(f"%{company}%"))
     if search:
@@ -50,7 +56,7 @@ def list_jobs(
     elif sort_by == "salary":
         query = query.order_by(Job.salary_max.desc().nullslast())
 
-    # Count total before pagination
+    # Total before pagination
     total = query.count()
 
     # Paginate
@@ -61,12 +67,12 @@ def list_jobs(
     job_responses = []
     for job in jobs:
         skills = [
-            {
-                "id": js.skill.id,
-                "name": js.skill.name or js.skill.canonical_name,
-                "category": js.skill.category,
-                "confidence": js.confidence,
-            }
+            SkillInJob(
+                id=js.skill.id,
+                name=js.skill.canonical_name or js.skill.name,
+                category=js.skill.category,
+                confidence=js.confidence,
+            )
             for js in job.job_skills
             if js.skill
         ]
@@ -74,6 +80,7 @@ def list_jobs(
             JobResponse(
                 id=job.id,
                 source=job.source,
+                data_type=job.data_type,
                 external_id=job.external_id,
                 title=job.title,
                 company_name=job.company_name,
@@ -83,11 +90,15 @@ def list_jobs(
                 salary_min=job.salary_min,
                 salary_max=job.salary_max,
                 salary_currency=job.salary_currency,
+                salary_period=job.salary_period,
+                salary_normalized=job.salary_normalized,
                 employment_type=job.employment_type,
                 experience_level=job.experience_level,
                 posted_at=job.posted_at,
                 url=job.url,
                 collected_at=job.collected_at,
+                first_seen_at=job.first_seen_at,
+                last_seen_at=job.last_seen_at,
                 skills=skills,
             )
         )
@@ -97,26 +108,24 @@ def list_jobs(
         total=total,
         page=page,
         page_size=page_size,
+        data_type="demo" if include_demo else "real",
     )
 
 
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job(job_id: int, db: Session = Depends(get_db)):
     """Get a single job by ID."""
-    from app.models.job import Job
-    from fastapi import HTTPException
-
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     skills = [
-        {
-            "id": js.skill.id,
-            "name": js.skill.name or js.skill.canonical_name,
-            "category": js.skill.category,
-            "confidence": js.confidence,
-        }
+        SkillInJob(
+            id=js.skill.id,
+            name=js.skill.canonical_name or js.skill.name,
+            category=js.skill.category,
+            confidence=js.confidence,
+        )
         for js in job.job_skills
         if js.skill
     ]
@@ -124,6 +133,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     return JobResponse(
         id=job.id,
         source=job.source,
+        data_type=job.data_type,
         external_id=job.external_id,
         title=job.title,
         company_name=job.company_name,
@@ -133,10 +143,14 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         salary_min=job.salary_min,
         salary_max=job.salary_max,
         salary_currency=job.salary_currency,
+        salary_period=job.salary_period,
+        salary_normalized=job.salary_normalized,
         employment_type=job.employment_type,
         experience_level=job.experience_level,
         posted_at=job.posted_at,
         url=job.url,
         collected_at=job.collected_at,
+        first_seen_at=job.first_seen_at,
+        last_seen_at=job.last_seen_at,
         skills=skills,
     )

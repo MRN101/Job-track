@@ -12,17 +12,22 @@ logger = logging.getLogger(__name__)
 def seed_skills(db: Session) -> int:
     """Seed canonical skills if they do not exist. Returns number of newly added skills."""
     existing_skills = {s.name.lower(): s for s in db.query(Skill).all()}
+    existing_canonical = {s.canonical_name.lower(): s for s in db.query(Skill).all()}
     added = 0
 
     for item in CANONICAL_SKILLS:
-        if item["name"].lower() not in existing_skills:
+        name_lower = item["name"].lower()
+        c_name_lower = item["canonical_name"].lower()
+        if name_lower not in existing_skills and c_name_lower not in existing_canonical:
             skill = Skill(
                 name=item["name"],
                 canonical_name=item["canonical_name"],
                 category=item["category"],
-                description=item.get("description", ""),
+                description=item.get("description", f"Canonical skill for {item['canonical_name']}"),
             )
             db.add(skill)
+            existing_skills[name_lower] = skill
+            existing_canonical[c_name_lower] = skill
             added += 1
 
     if added > 0:

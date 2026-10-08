@@ -1,15 +1,80 @@
-"""Skill extraction engine using dictionary-based regex and optional LLM."""
+"""Skill extraction and normalization engine."""
 
 import re
 import logging
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Tuple, Optional
 from app.analyzers.taxonomy import TAXONOMY
 
 logger = logging.getLogger(__name__)
 
+# Build global normalization dictionary
+_NORMALIZATION_MAP: Dict[str, str] = {}
+for _item in TAXONOMY:
+    _canonical = _item["canonical_name"]
+    _NORMALIZATION_MAP[_canonical.lower()] = _canonical
+    _NORMALIZATION_MAP[_item["name"].lower()] = _canonical
+    for _alias in _item.get("aliases", []):
+        _NORMALIZATION_MAP[_alias.strip().lower()] = _canonical
+
+# Special common aliases and variations
+_SPECIAL_NORMALIZATIONS = {
+    "react.js": "React",
+    "reactjs": "React",
+    "react js": "React",
+    "postgres": "PostgreSQL",
+    "postgresql": "PostgreSQL",
+    "postgre": "PostgreSQL",
+    "psql": "PostgreSQL",
+    "aws": "AWS",
+    "amazon web services": "AWS",
+    "golang": "Go",
+    "c++": "C++",
+    "cpp": "C++",
+    "c#": "C#",
+    "csharp": "C#",
+    ".net": ".NET Core",
+    ".net core": ".NET Core",
+    "dotnet": ".NET Core",
+    "k8s": "Kubernetes",
+    "node": "Node.js",
+    "nodejs": "Node.js",
+    "node.js": "Node.js",
+    "vue": "Vue.js",
+    "vue.js": "Vue.js",
+    "vuejs": "Vue.js",
+    "nextjs": "Next.js",
+    "next.js": "Next.js",
+}
+for _k, _v in _SPECIAL_NORMALIZATIONS.items():
+    _NORMALIZATION_MAP[_k.lower()] = _v
+
+
+def normalize_skill_name(name: str) -> str:
+    """Centralized skill normalization.
+    Maps aliases and variations to canonical skill names.
+    Examples:
+        'React.js' -> 'React'
+        'Postgres' -> 'PostgreSQL'
+        'Amazon Web Services' -> 'AWS'
+    """
+    if not name:
+        return ""
+    cleaned = name.strip()
+    lookup = cleaned.lower()
+    if lookup in _NORMALIZATION_MAP:
+        return _NORMALIZATION_MAP[lookup]
+
+    # Normalize punctuation and check again
+    simplified = re.sub(r"[\._\-\s]+", "", lookup)
+    for k, v in _NORMALIZATION_MAP.items():
+        if re.sub(r"[\._\-\s]+", "", k) == simplified:
+            return v
+
+    return cleaned
+
 
 class SkillExtractor:
-    """Extracts canonical and candidate skills from job texts."""
+    """Extracts canonical and candidate skills from job texts with strict false-positive prevention."""
 
     def __init__(self):
         self.taxonomy = TAXONOMY
@@ -17,20 +82,34 @@ class SkillExtractor:
         self._compile_patterns()
 
     def _compile_patterns(self):
-        """Compile regex patterns for taxonomy items handling punctuation properly."""
+        """Compile regex patterns for taxonomy items with strict boundaries."""
         for item in self.taxonomy:
             patterns = []
-            aliases = item.get("aliases", []) + [item["name"], item["canonical_name"]]
-            # Deduplicate lowercase aliases
-            unique_aliases = set(a.strip().lower() for a in aliases if a.strip())
+
+            # Check if item defines strict contextual patterns (e.g. for C, Go)
+            strict_patterns = item.get("strict_patterns")
+            if strict_patterns:
+                for sp in strict_patterns:
+                    try:
+                        compiled = re.compile(sp, re.IGNORECASE)
+                        patterns.append(compiled)
+                    except re.error as e:
+                        logger.warning(f"Failed to compile strict pattern {sp}: {e}")
+                # For items with strict patterns, only compile unambiguous aliases longer than 3 chars
+                aliases = item.get("aliases", [])
+                unique_aliases = set(a.strip().lower() for a in aliases if len(a.strip()) > 3)
+            else:
+                # For regular aliases, compile with boundary checks
+                aliases = item.get("aliases", []) + [item["name"], item["canonical_name"]]
+                unique_aliases = set(a.strip().lower() for a in aliases if len(a.strip()) > 1)
 
             for alias in unique_aliases:
-                # Handle special characters (C++, C#, .NET, CI/CD, etc.)
                 escaped = re.escape(alias)
-                # If alias starts/ends with alphanumeric, enforce word boundary
+                # Word boundaries that respect +, #, etc.
                 start_boundary = r"(?<![a-zA-Z0-9_])"
                 end_boundary = r"(?![a-zA-Z0-9_])"
                 pattern_str = f"{start_boundary}{escaped}{end_boundary}"
+
                 try:
                     compiled = re.compile(pattern_str, re.IGNORECASE)
                     patterns.append(compiled)
@@ -45,17 +124,7 @@ class SkillExtractor:
         description: str = "",
     ) -> List[Dict]:
         """Extract skills from title and description.
-
-        Returns list of dicts:
-        [
-            {
-                "canonical_name": "Python",
-                "category": "Programming Languages",
-                "confidence": 1.0,
-                "in_title": True
-            },
-            ...
-        ]
+        Returns list of dicts with canonical_name, category, confidence, and in_title.
         """
         combined_text = f"{title}\n{description}"
         detected: Dict[str, Dict] = {}
@@ -87,7 +156,7 @@ class SkillExtractor:
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini",
     ) -> List[str]:
-        """Optionally use OpenAI to detect emerging/candidate skills not in taxonomy."""
+        """Optionally use LLM to detect candidate skills not in taxonomy."""
         if not api_key or not description:
             return []
 
@@ -119,7 +188,7 @@ class SkillExtractor:
                     skills = [s.strip() for s in content.split(",") if s.strip()]
                     return skills
         except Exception as e:
-            logger.error(f"LLM extraction error: {e}")
+            logger.error(f"LLM candidate extraction error: {e}")
 
         return []
 
